@@ -17,6 +17,7 @@ const data_model = a.schema({
       yearBought: a.string(),
       clothingType: a.string(),
       wardrobeID: a.id(),
+      image: a.string(),
       wardrobe: a.belongsTo('Wardrobe', "wardrobeID") // Many-to-one relationship
     })
     .authorization(allow => [allow.owner()]),

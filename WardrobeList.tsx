@@ -20,7 +20,7 @@ const WardrobeList = () => {
     ClothingList: { wardrobeId: string };
   };
   
-  const navigation = useNavigation<StackNavigationProp<RootStackParamList, 'ClothingList'>>();
+  const navigation = useNavigation<StackNavigationProp<RootStackParamList, 'Clothing List'>>();
 
   //client.models.Wardrobe = client.models.Todo; // keep this line in
 
@@ -57,7 +57,7 @@ const WardrobeList = () => {
   }
 
   const handleWardrobePress = (wardrobeId: string) => {
-    navigation.navigate("ClothingList", {wardrobeId}) // Navigate to ClothingList screen
+    navigation.navigate("Clothing List", {wardrobeId}) // Navigate to ClothingList screen
   };
 
   const renderWardrobeItems = () => {

@@ -1,11 +1,16 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, ScrollView, Modal, TextInput, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Modal, TextInput, TouchableOpacity, Image } from "react-native";
 import { useRoute } from '@react-navigation/native';
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "./amplify/data/resource";
 import { GraphQLError } from "graphql";
+import { Platform } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { uploadData } from 'aws-amplify/storage';
+import { getUrl } from 'aws-amplify/storage';
 
 const client = generateClient<Schema>();
+
 
 const ClothingList = () => {
   const route = useRoute();
@@ -14,15 +19,33 @@ const ClothingList = () => {
   const [clothes, setClothes] = useState<Schema["Clothing"]["type"][]>([]);
   const [errors, setErrors] = useState<GraphQLError | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
-  
   // New clothing state
   const [newClothing, setNewClothing] = useState({
     brand: "",
     material: "",
     size: "",
     yearBought: "",
-    clothingType: ""
+    clothingType: "",
+    image: "",
   });
+
+  const [imageUris, setImageUris] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    (async () => {
+      const cameraRollStatus =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const cameraStatus = await ImagePicker.requestCameraPermissionsAsync();
+      if (
+        cameraRollStatus.status !== "granted" ||
+        cameraStatus.status !== "granted"
+      ) {
+        alert("Sorry, we need these permissions to make this work!");
+      }
+    })();
+  }, []);
+
+  
 
   // Fetch clothes for the wardrobe on load and listen for real-time updates
   useEffect(() => {
@@ -44,13 +67,53 @@ const ClothingList = () => {
       console.log("Unsubscribing");
       subscription.unsubscribe();
     };
-  });
+  }, [clothes.length]);
+
+  useEffect(() => {
+    const fetchImages = async () => {
+      const updatedUris = await Promise.all(
+        clothes.map(async (clothing) => {
+          // Only fetch image if it's not already in the state
+          if (clothing.image && !imageUris[clothing.id]) {
+            try {
+              const result = await getUrl({ path: clothing.image });
+              return { id: clothing.id, uri: result.url.toString() };
+            } catch (error) {
+              console.error("Error fetching image for clothing ID", clothing.id, error);
+              return { id: clothing.id, uri: "https://cdn-icons-png.flaticon.com/512/7596/7596292.png" }; // Default image on error
+            }
+          }
+          return null; // If the image URI already exists, skip fetching
+        })
+      );
+  
+      // Update only newly fetched URIs
+      const validUris = updatedUris.filter(item => item !== null);
+      if (validUris.length > 0) {
+        setImageUris(prev => {
+          const newUris = { ...prev };
+          validUris.forEach(({ id, uri }) => {
+            newUris[id] = uri;
+          });
+          return newUris;
+        });
+      }
+    };
+  
+    fetchImages();
+  }, [clothes]); // Only depend on `clothes` here
+  
+  
 
   const renderClothingItems = () => {
     return clothes.map((clothing) => (
       <View key={clothing.id} style={styles.clothingItemContainer}>
+        <Image 
+          source={{ uri: imageUris[clothing.id] || "https://cdn-icons-png.flaticon.com/512/7596/7596292.png" }}
+          style={styles.image}
+        />
         <Text style={styles.clothingItemText}>
-          {clothing.brand} - {clothing.size}
+          {clothing.brand || 'Unknown'} - {clothing.size || 'N/A'}
         </Text>
         <TouchableOpacity
           style={styles.deleteButton}
@@ -58,7 +121,9 @@ const ClothingList = () => {
             try {
               await client.models.Clothing.delete({ id: clothing.id });
               console.log("Deleted clothing item successfully");
+              clothes.length -= 1;
               // No need to manually filter out the item as the subscription will handle it
+              setClothes(clothes.filter(item => item.id !== clothing.id));
             } catch (error) {
               console.error("Error deleting clothing item:", error);
               if (error instanceof GraphQLError) {
@@ -72,7 +137,88 @@ const ClothingList = () => {
       </View>
     ));
   };
-  
+
+
+  const pickImage = async () => {
+    // No permissions request is necessary for launching the image library
+    ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 1,
+    }).then((response) => {
+      console.log('Image picked : ', response);
+      handleImagePicked(response);
+    }).catch((e) => {
+      console.error('Error saving photo in launchImageLibraryAsync : ', e.message);
+    });
+  };
+
+  const takePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      alert('Permission to access camera is required!');
+      return;
+    }
+    ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 1,
+    }).then((response) => {
+      console.log('Image picked : ', response);
+      handleImagePicked(response);
+    }).catch((e) => {
+      console.error('Error saving photo in launchCameraAsync : ', e.message);
+    });
+  };
+
+
+  const handleImagePicked = async (pickerResult: ImagePicker.ImagePickerResult) => {
+    try {
+      if (pickerResult.assets && pickerResult.assets.length > 0) {
+        const img = await fetchImageFromUri(pickerResult.assets[0].uri);
+        const imageID = await uploadImage(new File([img], "image.jpg", { type: "image/jpeg" }));
+        setNewClothing({...newClothing, image: imageID});
+      } else {
+        console.error("No assets found in pickerResult");
+      }
+    } catch (e) {
+      console.log(e);
+      alert("Upload failed");
+    }
+  };
+
+  const uploadImage = async (img: File) => {
+    const result = await uploadData({
+      path: ({identityId}) => `photos/${identityId}.jpg`,
+      data: img,
+    }).result;
+    const identityId = result.path.split('/')[1].split('.')[0];
+    console.log("identityId : ", identityId);
+    return result.path;
+  };
+
+  async function getLinkToStorageFile(identityId: string): Promise<URL> {
+    return getUrl({
+      path: `photos/${identityId}.jpg`,
+    }).then((result) => {
+      return result.url;
+    });
+  };  
+
+  const fetchImageFromUri = async (uri: string) => {
+    try {
+      const response = await fetch(uri);
+      console.log("uri : ", uri);
+      const blob = await response.blob();
+      return blob;
+    } catch (error) {
+      console.error("Error fetching image from URI:", error);
+      throw error;
+    }
+  };
+
 
   // Create a new clothing entry
   const createClothing = async () => {
@@ -83,6 +229,9 @@ const ClothingList = () => {
           wardrobeID: wardrobeId, // Using wardrobeId from the route
           yearBought: newClothing.yearBought, // Ensure yearBought is a number
         });
+        clothes.length += 1;
+        console.log('New clothing created : ', newClothing);
+        console.log('number of clothes : ', clothes.length);
         renderClothingItems();
         setModalVisible(false); // Hide the modal after creating the clothing
         setNewClothing({
@@ -90,7 +239,8 @@ const ClothingList = () => {
           material: "",
           size: "",
           yearBought: "",
-          clothingType: ""
+          clothingType: "",
+          image: "",
         }); // Reset fields
       } catch (error) {
         console.error("Creation error:", error);
@@ -100,18 +250,6 @@ const ClothingList = () => {
       }
     } else {
       alert("Please fill in all required fields."); // Simple validation
-    }
-  };
-
-  // Handle clothing item deletion
-  const handleDelete = async (clothingId: string) => {
-    try {
-      await client.models.Clothing.delete({ id: clothingId });
-    } catch (error) {
-      console.error("Error deleting clothing item:", error);
-      if (error instanceof GraphQLError) {
-        setErrors(error);
-      }
     }
   };
 
@@ -173,6 +311,18 @@ const ClothingList = () => {
             />
             <TouchableOpacity
               style={[styles.button, styles.createButton]}
+              onPress={pickImage}
+            >
+              <Text style={styles.buttonText}>Add Image</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.button, styles.createButton]}
+              onPress={takePhoto}
+            >
+              <Text style={styles.buttonText}>Take Photo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.button, styles.createButton]}
               onPress={ () => {createClothing(); renderClothingItems();}}
             >
               <Text style={styles.buttonText}>Create</Text>
@@ -184,7 +334,8 @@ const ClothingList = () => {
                 material: "",
                 size: "",
                 yearBought: "",
-                clothingType: ""
+                clothingType: "",
+                image: "",
               }); renderClothingItems();}}
             >
               <Text style={styles.buttonText}>Cancel</Text>
@@ -212,6 +363,10 @@ const styles = StyleSheet.create({
   },
   scrollContainer: {
     flexGrow: 1,
+  },
+  image: {
+    width: 200,
+    height: 200,
   },
   clothingItemContainer: {
     flexDirection: "row",

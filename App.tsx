@@ -1,10 +1,9 @@
-import React from "react";
-import { Text, View, StyleSheet, SafeAreaView, TouchableOpacity } from "react-native";
+import React, { useState, useEffect } from "react";
+import { Text, View, StyleSheet, SafeAreaView, TouchableOpacity, Button, Image } from "react-native";
 import { Amplify } from "aws-amplify";
 import { Authenticator, useAuthenticator } from "@aws-amplify/ui-react-native";
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-
 import outputs from "./amplify_outputs.json";
 import WardrobeList from "./WardrobeList";
 import ClothingList from "./ClothingList"; // Import your new screen
@@ -33,8 +32,8 @@ const App = () => {
           <SafeAreaView style={styles.container}>
             <SignOutButton />
             <Stack.Navigator>
-              <Stack.Screen name="WardrobeList" component={WardrobeList} />
-              <Stack.Screen name="ClothingList" component={ClothingList} />
+              <Stack.Screen name="Wardrobe List" component={WardrobeList} />
+              <Stack.Screen name="Clothing List" component={ClothingList} />
             </Stack.Navigator>
           </SafeAreaView>
         </NavigationContainer>
@@ -42,6 +41,7 @@ const App = () => {
     </Authenticator.Provider>
   );
 };
+
 
 const styles = StyleSheet.create({
   container: {
@@ -72,3 +72,6 @@ const styles = StyleSheet.create({
 });
 
 export default App;
+
+
+
